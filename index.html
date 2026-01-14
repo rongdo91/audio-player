@@ -54,6 +54,7 @@
             font-weight: 500;
         }
 
+        input,
         textarea {
             width: 100%;
             padding: 12px;
@@ -63,6 +64,9 @@
             color: var(--text);
             font-size: 14px;
             margin-bottom: 15px;
+        }
+
+        textarea {
             min-height: 150px;
             resize: vertical;
             font-family: monospace;
@@ -82,6 +86,15 @@
 
         .btn:hover {
             background: #5254e1;
+        }
+
+        .row {
+            display: flex;
+            gap: 15px;
+        }
+
+        .row>* {
+            flex: 1;
         }
 
         .chapter-list {
@@ -192,6 +205,10 @@
             font-size: 13px;
             text-align: center;
         }
+
+        .small-input {
+            max-width: 150px;
+        }
     </style>
 </head>
 
@@ -203,6 +220,13 @@
             <label>📝 Dán danh sách link file MP3:</label>
             <textarea id="linkList"
                 placeholder="Dán link vào đây (ngăn cách bằng dấu xuống dòng, dấu phẩy, hoặc khoảng trắng đều được)"></textarea>
+
+            <div class="row">
+                <div>
+                    <label>🔢 Bắt đầu từ chương:</label>
+                    <input type="number" id="startChapter" value="1" min="1" class="small-input">
+                </div>
+            </div>
 
             <button class="btn" onclick="loadFromLinks()">▶️ Tải Danh Sách</button>
         </div>
@@ -238,60 +262,60 @@
         const CHAPTER_DURATION = 5 * 60 * 1000;
 
         function extractLinks(text) {
-            // Tìm tất cả Google Drive links trong text
             const regex = /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g;
             const matches = [];
             let match;
-
             while ((match = regex.exec(text)) !== null) {
                 matches.push({
                     id: match[1],
                     url: `https://drive.google.com/file/d/${match[1]}/preview`
                 });
             }
-
             return matches;
         }
 
         function loadFromLinks() {
             const text = document.getElementById('linkList').value.trim();
+            const startNum = parseInt(document.getElementById('startChapter').value) || 1;
+
             if (!text) { alert('Vui lòng dán link!'); return; }
 
             const links = extractLinks(text);
+            if (links.length === 0) { alert('Không tìm thấy link Google Drive!'); return; }
 
-            if (links.length === 0) {
-                alert('Không tìm thấy link Google Drive hợp lệ!');
-                return;
-            }
-
-            // Tạo danh sách với tên chương
+            // Tạo danh sách với số chương bắt đầu từ startNum
             audioFiles = links.map((link, i) => ({
-                name: `Chương ${i + 1}`,
+                name: `Chương ${startNum + i}`,
+                chapterNum: startNum + i,
                 id: link.id,
                 url: link.url
             }));
 
             localStorage.setItem('gdrive_links', text);
+            localStorage.setItem('gdrive_start', startNum);
             renderChapterList();
         }
 
         function renderChapterList() {
             const total = audioFiles.length;
+            const first = audioFiles[0]?.chapterNum || 1;
+            const last = audioFiles[total - 1]?.chapterNum || total;
+
             document.getElementById('totalChapters').textContent = total;
-            document.getElementById('statusBox').textContent = `✅ Đã tìm thấy ${total} file audio`;
+            document.getElementById('statusBox').textContent = `✅ Đã tải ${total} file: Chương ${first} → ${last}`;
 
             document.getElementById('chapterList').innerHTML = audioFiles.map((f, i) =>
                 `<div class="chapter-item" onclick="playChapter(${i})" id="chapter-${i}">
                     <span>${f.name}</span>
-                    <span class="chapter-num">#${i + 1}</span>
+                    <span class="chapter-num">${i + 1}/${total}</span>
                 </div>`
             ).join('');
 
             document.getElementById('chapterListCard').classList.remove('hidden');
             document.getElementById('playerCard').classList.remove('hidden');
 
-            const savedChapter = parseInt(localStorage.getItem('gdrive_chapter') || 0);
-            playChapter(Math.min(savedChapter, audioFiles.length - 1));
+            const savedIndex = parseInt(localStorage.getItem('gdrive_index') || 0);
+            playChapter(Math.min(savedIndex, audioFiles.length - 1));
         }
 
         function playChapter(index) {
@@ -305,27 +329,24 @@
             document.getElementById('audioFrame').src = audioFiles[index].url;
 
             document.getElementById(`chapter-${index}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
-            localStorage.setItem('gdrive_chapter', index);
+            localStorage.setItem('gdrive_index', index);
 
-            // Auto next timer
             if (autoNextTimer) clearTimeout(autoNextTimer);
             if (document.getElementById('autoNext').checked) {
                 autoNextTimer = setTimeout(playNext, CHAPTER_DURATION);
             }
         }
 
-        function playNext() {
-            if (currentIndex < audioFiles.length - 1) playChapter(currentIndex + 1);
-        }
-        function playPrev() {
-            if (currentIndex > 0) playChapter(currentIndex - 1);
-        }
+        function playNext() { if (currentIndex < audioFiles.length - 1) playChapter(currentIndex + 1); }
+        function playPrev() { if (currentIndex > 0) playChapter(currentIndex - 1); }
 
         // Load saved
         window.addEventListener('load', () => {
-            const saved = localStorage.getItem('gdrive_links');
-            if (saved) {
-                document.getElementById('linkList').value = saved;
+            const savedLinks = localStorage.getItem('gdrive_links');
+            const savedStart = localStorage.getItem('gdrive_start');
+            if (savedLinks) {
+                document.getElementById('linkList').value = savedLinks;
+                if (savedStart) document.getElementById('startChapter').value = savedStart;
                 loadFromLinks();
             }
         });
