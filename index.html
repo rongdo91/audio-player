@@ -54,7 +54,6 @@
             font-weight: 500;
         }
 
-        input,
         textarea {
             width: 100%;
             padding: 12px;
@@ -64,9 +63,6 @@
             color: var(--text);
             font-size: 14px;
             margin-bottom: 15px;
-        }
-
-        textarea {
             min-height: 150px;
             resize: vertical;
             font-family: monospace;
@@ -89,7 +85,7 @@
         }
 
         .chapter-list {
-            max-height: 300px;
+            max-height: 350px;
             overflow-y: auto;
             margin: 15px 0;
         }
@@ -101,6 +97,8 @@
             margin-bottom: 8px;
             cursor: pointer;
             transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
         }
 
         .chapter-item:hover {
@@ -110,6 +108,11 @@
         .chapter-item.playing {
             background: var(--accent);
             color: white;
+        }
+
+        .chapter-num {
+            opacity: 0.6;
+            font-size: 12px;
         }
 
         .player-controls {
@@ -180,13 +183,14 @@
             background: #2a2a4a;
         }
 
-        .warning {
-            background: #f59e0b20;
-            border: 1px solid #f59e0b;
-            padding: 12px;
+        .status {
+            background: #22c55e20;
+            border: 1px solid #22c55e;
+            padding: 10px;
             border-radius: 8px;
             margin-bottom: 15px;
             font-size: 13px;
+            text-align: center;
         }
     </style>
 </head>
@@ -197,19 +201,15 @@
 
         <div class="card" id="setupCard">
             <label>📝 Dán danh sách link file MP3:</label>
-            <textarea id="linkList" placeholder="Mỗi dòng 1 link, ví dụ:
-https://drive.google.com/file/d/1ABC.../view
-https://drive.google.com/file/d/2DEF.../view"></textarea>
+            <textarea id="linkList"
+                placeholder="Dán link vào đây (ngăn cách bằng dấu xuống dòng, dấu phẩy, hoặc khoảng trắng đều được)"></textarea>
 
             <button class="btn" onclick="loadFromLinks()">▶️ Tải Danh Sách</button>
-
-            <div class="warning" style="margin-top: 15px;">
-                ⚠️ <b>Quan trọng:</b> File phải được chia sẻ <b>"Bất kỳ ai có link"</b>
-            </div>
         </div>
 
         <div class="card hidden" id="chapterListCard">
-            <h3 style="margin-bottom: 10px;">📚 Danh Sách (<span id="totalChapters">0</span> file)</h3>
+            <div id="statusBox" class="status"></div>
+            <h3 style="margin-bottom: 10px;">📚 Danh Sách (<span id="totalChapters">0</span> chương)</h3>
             <div class="chapter-list" id="chapterList"></div>
         </div>
 
@@ -217,7 +217,6 @@ https://drive.google.com/file/d/2DEF.../view"></textarea>
             <p class="now-playing">Đang phát:</p>
             <p class="chapter-title" id="chapterTitle">-</p>
 
-            <!-- Dùng iframe để phát từ Google Drive -->
             <iframe id="audioFrame" class="audio-frame" allow="autoplay"></iframe>
 
             <div class="controls">
@@ -227,24 +226,7 @@ https://drive.google.com/file/d/2DEF.../view"></textarea>
 
             <div class="auto-next">
                 <input type="checkbox" id="autoNext" checked>
-                <label for="autoNext">Tự động chuyển chương (mỗi 5 phút)</label>
-            </div>
-
-            <p style="margin-top: 15px; font-size: 12px; opacity: 0.6; text-align: center;">
-                💡 Mỗi chương tự động chuyển sau ~5 phút (ước tính)
-            </p>
-        </div>
-
-        <div class="card">
-            <h3 style="margin-bottom: 15px;">📖 Hướng Dẫn</h3>
-            <div style="font-size: 13px; line-height: 1.8;">
-                <ol style="padding-left: 20px;">
-                    <li>Mở Google Drive → vào folder audio</li>
-                    <li>Chọn tất cả: <b>Ctrl+A</b></li>
-                    <li>Chuột phải → <b>Chia sẻ</b> → <b>"Bất kỳ ai có link"</b></li>
-                    <li>Chuột phải từng file → <b>Lấy đường dẫn</b></li>
-                    <li>Dán tất cả link vào ô trên</li>
-                </ol>
+                <label for="autoNext">Tự động chuyển (mỗi 5 phút)</label>
             </div>
         </div>
     </div>
@@ -253,28 +235,40 @@ https://drive.google.com/file/d/2DEF.../view"></textarea>
         let audioFiles = [];
         let currentIndex = 0;
         let autoNextTimer = null;
-        const CHAPTER_DURATION = 5 * 60 * 1000; // 5 phút mỗi chương (ước tính)
+        const CHAPTER_DURATION = 5 * 60 * 1000;
 
-        function getEmbedUrl(url) {
-            // Lấy file ID từ link
-            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-            if (match) {
-                // Dùng format preview để phát được
-                return `https://drive.google.com/file/d/${match[1]}/preview`;
+        function extractLinks(text) {
+            // Tìm tất cả Google Drive links trong text
+            const regex = /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g;
+            const matches = [];
+            let match;
+
+            while ((match = regex.exec(text)) !== null) {
+                matches.push({
+                    id: match[1],
+                    url: `https://drive.google.com/file/d/${match[1]}/preview`
+                });
             }
-            return url;
+
+            return matches;
         }
 
         function loadFromLinks() {
             const text = document.getElementById('linkList').value.trim();
-            if (!text) { alert('Vui lòng dán ít nhất 1 link!'); return; }
+            if (!text) { alert('Vui lòng dán link!'); return; }
 
-            const links = text.split('\n').filter(l => l.trim() && l.includes('drive.google.com'));
-            if (links.length === 0) { alert('Không tìm thấy link Google Drive!'); return; }
+            const links = extractLinks(text);
 
+            if (links.length === 0) {
+                alert('Không tìm thấy link Google Drive hợp lệ!');
+                return;
+            }
+
+            // Tạo danh sách với tên chương
             audioFiles = links.map((link, i) => ({
                 name: `Chương ${i + 1}`,
-                url: getEmbedUrl(link.trim())
+                id: link.id,
+                url: link.url
             }));
 
             localStorage.setItem('gdrive_links', text);
@@ -282,13 +276,22 @@ https://drive.google.com/file/d/2DEF.../view"></textarea>
         }
 
         function renderChapterList() {
-            document.getElementById('totalChapters').textContent = audioFiles.length;
+            const total = audioFiles.length;
+            document.getElementById('totalChapters').textContent = total;
+            document.getElementById('statusBox').textContent = `✅ Đã tìm thấy ${total} file audio`;
+
             document.getElementById('chapterList').innerHTML = audioFiles.map((f, i) =>
-                `<div class="chapter-item" onclick="playChapter(${i})" id="chapter-${i}">${f.name}</div>`
+                `<div class="chapter-item" onclick="playChapter(${i})" id="chapter-${i}">
+                    <span>${f.name}</span>
+                    <span class="chapter-num">#${i + 1}</span>
+                </div>`
             ).join('');
+
             document.getElementById('chapterListCard').classList.remove('hidden');
             document.getElementById('playerCard').classList.remove('hidden');
-            playChapter(parseInt(localStorage.getItem('gdrive_chapter') || 0));
+
+            const savedChapter = parseInt(localStorage.getItem('gdrive_chapter') || 0);
+            playChapter(Math.min(savedChapter, audioFiles.length - 1));
         }
 
         function playChapter(index) {
@@ -299,18 +302,15 @@ https://drive.google.com/file/d/2DEF.../view"></textarea>
             document.getElementById(`chapter-${index}`).classList.add('playing');
             document.getElementById('chapterTitle').textContent = audioFiles[index].name;
 
-            // Load iframe với preview URL
             document.getElementById('audioFrame').src = audioFiles[index].url;
 
             document.getElementById(`chapter-${index}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
             localStorage.setItem('gdrive_chapter', index);
 
-            // Auto next after estimated duration
+            // Auto next timer
             if (autoNextTimer) clearTimeout(autoNextTimer);
             if (document.getElementById('autoNext').checked) {
-                autoNextTimer = setTimeout(() => {
-                    playNext();
-                }, CHAPTER_DURATION);
+                autoNextTimer = setTimeout(playNext, CHAPTER_DURATION);
             }
         }
 
@@ -321,7 +321,7 @@ https://drive.google.com/file/d/2DEF.../view"></textarea>
             if (currentIndex > 0) playChapter(currentIndex - 1);
         }
 
-        // Load saved data
+        // Load saved
         window.addEventListener('load', () => {
             const saved = localStorage.getItem('gdrive_links');
             if (saved) {
