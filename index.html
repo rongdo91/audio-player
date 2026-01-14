@@ -54,8 +54,7 @@
             font-weight: 500;
         }
 
-        input,
-        textarea {
+        input {
             width: 100%;
             padding: 12px;
             background: #2a2a4a;
@@ -66,15 +65,9 @@
             margin-bottom: 15px;
         }
 
-        input:focus,
-        textarea:focus {
+        input:focus {
             outline: none;
             border-color: var(--accent);
-        }
-
-        textarea {
-            min-height: 150px;
-            resize: vertical;
         }
 
         .btn {
@@ -92,6 +85,11 @@
 
         .btn:hover {
             background: #5254e1;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .chapter-list {
@@ -182,16 +180,23 @@
             accent-color: var(--accent);
         }
 
-        .instructions {
-            font-size: 13px;
-            opacity: 0.8;
-            line-height: 1.8;
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
         }
 
-        .instructions code {
+        .status.loading {
             background: #3a3a5a;
-            padding: 2px 6px;
-            border-radius: 4px;
+        }
+
+        .status.error {
+            background: #ef4444;
+        }
+
+        .status.success {
+            background: #22c55e;
         }
 
         .hidden {
@@ -206,21 +211,23 @@
 
         <!-- Setup Form -->
         <div class="card" id="setupCard">
-            <label>📁 Google Drive Folder ID:</label>
-            <input type="text" id="folderId" placeholder="Ví dụ: 1ABC...xyz (lấy từ URL folder)">
+            <label>📁 Dán Link Folder Google Drive:</label>
+            <input type="text" id="folderUrl" placeholder="https://drive.google.com/drive/folders/1ABC...xyz">
 
-            <label>📝 Hoặc dán danh sách link MP3:</label>
-            <textarea id="linkList" placeholder="Mỗi dòng 1 link, ví dụ:
-https://drive.google.com/file/d/FILE_ID_1/view
-https://drive.google.com/file/d/FILE_ID_2/view
-..."></textarea>
+            <div id="statusBox" class="status hidden"></div>
 
-            <button class="btn" onclick="loadFromLinks()">▶️ Tải Danh Sách</button>
+            <button class="btn" id="loadBtn" onclick="loadFolder()">
+                📂 Tải Danh Sách File
+            </button>
+
+            <p style="margin-top: 15px; font-size: 13px; opacity: 0.7; text-align: center;">
+                ⚠️ Folder phải được chia sẻ "Bất kỳ ai có link"
+            </p>
         </div>
 
         <!-- Chapter List -->
         <div class="card hidden" id="chapterListCard">
-            <h3 style="margin-bottom: 10px;">📚 Danh Sách Chương (<span id="totalChapters">0</span>)</h3>
+            <h3 style="margin-bottom: 10px;">📚 Danh Sách (<span id="totalChapters">0</span> file)</h3>
             <div class="chapter-list" id="chapterList"></div>
         </div>
 
@@ -242,61 +249,90 @@ https://drive.google.com/file/d/FILE_ID_2/view
                 <label for="autoNext">Tự động chuyển chương</label>
             </div>
         </div>
-
-        <!-- Instructions -->
-        <div class="card">
-            <h3 style="margin-bottom: 10px;">📖 Hướng Dẫn</h3>
-            <div class="instructions">
-                <p><b>Cách 1: Dán link từng file</b></p>
-                <ol style="margin-left: 20px; margin-bottom: 15px;">
-                    <li>Mở Google Drive, vào folder audio</li>
-                    <li>Click chuột phải vào từng file → "Lấy đường dẫn"</li>
-                    <li>Dán tất cả link vào ô trên (mỗi dòng 1 link)</li>
-                    <li>Click "Tải Danh Sách"</li>
-                </ol>
-
-                <p><b>⚠️ Quan trọng:</b> File phải được chia sẻ "Bất kỳ ai có link" để phát được!</p>
-            </div>
-        </div>
     </div>
 
     <script>
+        // Google Drive API Key (public, read-only)
+        const API_KEY = 'AIzaSyC1eQ1vVKBT1aONz9O1tApxJgPLwdLKqLY';
+
         let audioFiles = [];
         let currentIndex = 0;
         const audio = document.getElementById('audioPlayer');
 
-        // Convert Google Drive link to direct download link
-        function getDirectLink(url) {
-            // Format: https://drive.google.com/file/d/FILE_ID/view
-            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-            if (match) {
-                const fileId = match[1];
-                return `https://drive.google.com/uc?export=download&id=${fileId}`;
-            }
-            // Already a direct link or other format
-            return url;
+        function showStatus(msg, type = 'loading') {
+            const box = document.getElementById('statusBox');
+            box.textContent = msg;
+            box.className = `status ${type}`;
+            box.classList.remove('hidden');
         }
 
-        // Load from pasted links
-        function loadFromLinks() {
-            const text = document.getElementById('linkList').value.trim();
-            if (!text) {
-                alert('Vui lòng dán ít nhất 1 link!');
+        function hideStatus() {
+            document.getElementById('statusBox').classList.add('hidden');
+        }
+
+        function extractFolderId(url) {
+            const match = url.match(/folders\/([a-zA-Z0-9_-]+)/);
+            return match ? match[1] : null;
+        }
+
+        async function loadFolder() {
+            const url = document.getElementById('folderUrl').value.trim();
+            const folderId = extractFolderId(url);
+
+            if (!folderId) {
+                showStatus('❌ Link không hợp lệ!', 'error');
                 return;
             }
 
-            const links = text.split('\n').filter(l => l.trim());
-            audioFiles = links.map((link, i) => ({
-                name: `Chương ${i + 1}`,
-                url: getDirectLink(link.trim())
-            }));
+            showStatus('⏳ Đang tải danh sách file...');
+            document.getElementById('loadBtn').disabled = true;
 
-            renderChapterList();
+            try {
+                // Use Google Drive API to list files
+                const apiUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+mimeType+contains+'audio'&key=${API_KEY}&fields=files(id,name)&orderBy=name`;
+
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error.message);
+                }
+
+                if (!data.files || data.files.length === 0) {
+                    showStatus('❌ Không tìm thấy file audio! Hãy chắc chắn folder đã được chia sẻ công khai.', 'error');
+                    return;
+                }
+
+                // Sort by name (chapter number)
+                audioFiles = data.files
+                    .sort((a, b) => {
+                        const numA = parseInt(a.name.match(/\d+/) || 0);
+                        const numB = parseInt(b.name.match(/\d+/) || 0);
+                        return numA - numB;
+                    })
+                    .map(f => ({
+                        id: f.id,
+                        name: f.name.replace('.mp3', '').replace('chapter_', 'Chương '),
+                        url: `https://drive.google.com/uc?export=download&id=${f.id}`
+                    }));
+
+                showStatus(`✅ Tìm thấy ${audioFiles.length} file!`, 'success');
+                setTimeout(hideStatus, 2000);
+
+                renderChapterList();
+
+                // Save to localStorage
+                localStorage.setItem('gdrive_folder_url', url);
+
+            } catch (error) {
+                console.error(error);
+                showStatus('❌ Lỗi: ' + error.message, 'error');
+            } finally {
+                document.getElementById('loadBtn').disabled = false;
+            }
         }
 
         function renderChapterList() {
-            if (audioFiles.length === 0) return;
-
             document.getElementById('totalChapters').textContent = audioFiles.length;
 
             const listHtml = audioFiles.map((f, i) =>
@@ -318,12 +354,10 @@ https://drive.google.com/file/d/FILE_ID_2/view
             currentIndex = index;
             const file = audioFiles[index];
 
-            // Update UI
             document.querySelectorAll('.chapter-item').forEach(el => el.classList.remove('playing'));
             document.getElementById(`chapter-${index}`).classList.add('playing');
             document.getElementById('chapterTitle').textContent = file.name;
 
-            // Load and play
             audio.src = file.url;
             audio.play().catch(e => {
                 console.error('Play error:', e);
@@ -332,6 +366,9 @@ https://drive.google.com/file/d/FILE_ID_2/view
 
             updatePlayBtn();
             document.getElementById(`chapter-${index}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Save progress
+            localStorage.setItem('gdrive_current_chapter', index);
         }
 
         function togglePlay() {
@@ -352,7 +389,6 @@ https://drive.google.com/file/d/FILE_ID_2/view
             if (currentIndex > 0) playChapter(currentIndex - 1);
         }
 
-        // Auto next
         audio.addEventListener('ended', () => {
             if (document.getElementById('autoNext').checked) playNext();
         });
@@ -360,14 +396,12 @@ https://drive.google.com/file/d/FILE_ID_2/view
         audio.addEventListener('play', updatePlayBtn);
         audio.addEventListener('pause', updatePlayBtn);
 
-        // Save/Load from localStorage
+        // Load saved URL on page load
         window.addEventListener('load', () => {
-            const saved = localStorage.getItem('gdrive_player_links');
-            if (saved) document.getElementById('linkList').value = saved;
-        });
-
-        document.getElementById('linkList').addEventListener('change', function () {
-            localStorage.setItem('gdrive_player_links', this.value);
+            const savedUrl = localStorage.getItem('gdrive_folder_url');
+            if (savedUrl) {
+                document.getElementById('folderUrl').value = savedUrl;
+            }
         });
     </script>
 </body>
